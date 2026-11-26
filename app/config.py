@@ -22,17 +22,17 @@ class Settings(BaseSettings):
     )
 
     ollama_num_ctx: int = Field(
-        default=4096,
+        default=8192,
         gt=0,
     )
 
     ollama_num_predict: int = Field(
-        default=512,
+        default=2048,
         gt=0,
     )
 
     llm_max_input_characters: int = Field(
-        default=4000,
+        default=8000,
         ge=200,
     )
 

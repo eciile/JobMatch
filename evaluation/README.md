@@ -67,3 +67,17 @@ Live evaluation requires a running inference server and is kept separate from de
 - Record token usage and inference throughput.
 - Compare inference providers and model configurations.
 - Introduce repeatable performance benchmarking.
+## Known Limitations
+
+- The quantized 4B model may confuse company technology
+  stacks with explicit candidate requirements.
+- Alternative qualifications and experience thresholds
+  are not always preserved correctly.
+- Normalized exact matching may penalize semantically
+  equivalent expressions.
+- JavaScript-rendered job advertisements may require
+  browser-based retrieval. A Playwright proof of concept
+  was validated, but production integration is deferred
+  until appropriate network isolation is implemented.
+- Extraction quality remains model-dependent and will
+  be evaluated across future inference providers.

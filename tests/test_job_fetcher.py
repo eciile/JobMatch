@@ -609,7 +609,6 @@ def test_ollama_job_extraction_client() -> None:
                     "title": "Junior Data Engineer",
                     "company": "Example Company",
                     "location": "Paris, France",
-                    "description": "Build reliable data pipelines.",
                     "employment_types": ["FULL_TIME"],
                     "requirements": {
                         "required_skills": [
@@ -631,14 +630,11 @@ def test_ollama_job_extraction_client() -> None:
                         "Teamwork"
                         ],
                         "languages": [
-                        "French",
-                        "English",
-                        "french"
-                        ]
-                    },
-                    "date_posted": null,
-                    "valid_through": null,
-                    "application_url": "https://invented.example.com"
+                            "French",
+                            "English",
+                            "french"
+                            ]
+                        }
                     }
                     """
                 )
@@ -681,6 +677,16 @@ def test_ollama_job_extraction_client() -> None:
     assert job.company == "Example Company"
     assert job.location == "Paris, France"
     assert job.employment_types == ["FULL_TIME"]
+    assert job.description == (
+        "Example Company is looking for a Junior Data "
+        "Engineer to build reliable Python and SQL data "
+        "pipelines. The candidate will validate data "
+        "quality, maintain APIs, write automated tests, "
+        "and collaborate with engineering teams. This "
+        "is a full-time role based in Paris, France."
+    )
+    assert job.date_posted is None
+    assert job.valid_through is None
 
     # JobMatch must use the trusted source URL, not the
     # URL returned by the model.
@@ -691,6 +697,10 @@ def test_ollama_job_extraction_client() -> None:
     assert fake_client.received_model == "test-model"
     assert fake_client.received_messages is not None
     assert fake_client.received_format is not None
+    properties = fake_client.received_format["properties"]
+    assert "application_url" not in properties
+    assert "date_posted" not in properties
+    assert "valid_through" not in properties
     assert job.requirements.required_skills == [
         "Python",
         "SQL",
