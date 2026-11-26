@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from app.config import Settings
 from app.services.llm_job_extractor import (
+    LlmExtractedJob,
     OllamaJobExtractionClient,
     _label_requirement_priority,
     _select_requirements_text,
@@ -121,17 +122,17 @@ def test_llm_default_generation_options() -> None:
     settings = Settings(
         _env_file=None,
         ollama_temperature=0.0,
-        ollama_num_ctx=4096,
-        ollama_num_predict=512,
-        llm_max_input_characters=4000,
+        ollama_num_ctx=8192,
+        ollama_num_predict=2048,
+        llm_max_input_characters=8000,
     )
 
     client = OllamaJobExtractionClient(settings=settings)
 
     assert client._generation_options() == {
         "temperature": 0.0,
-        "num_ctx": 4096,
-        "num_predict": 512,
+        "num_ctx": 8192,
+        "num_predict": 2048,
     }
 
 
@@ -171,3 +172,38 @@ def test_llm_rejects_invalid_configuration(
 ) -> None:
     with pytest.raises(ValidationError):
         Settings(_env_file=None, **{field: value})
+
+
+def test_llm_generation_schema_excludes_deterministic_fields() -> None:
+    schema = LlmExtractedJob.model_json_schema()
+    properties = schema["properties"]
+
+    assert "application_url" not in properties
+    assert "date_posted" not in properties
+    assert "valid_through" not in properties
+    assert "description" not in properties
+
+    assert schema["additionalProperties"] is False
+
+
+def test_llm_generation_schema_retains_semantic_fields() -> None:
+    properties = LlmExtractedJob.model_json_schema()["properties"]
+
+    assert set(properties) == {
+        "title",
+        "company",
+        "location",
+        "employment_types",
+        "requirements",
+    }
+
+
+def test_llm_generation_schema_rejects_unexpected_fields() -> None:
+    with pytest.raises(ValidationError):
+        LlmExtractedJob.model_validate(
+            {
+                "title": "AI Engineer",
+                "application_url": "https://example.com/job",
+                "valid_through": "2026-12-31",
+            }
+        )
