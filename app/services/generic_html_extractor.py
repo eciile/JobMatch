@@ -22,9 +22,40 @@ METADATA_LABELS = {
     "reference": "reference",
 }
 
+_RELATED_JOB_SELECTORS = (
+    ".block-other-offers",
+    ".related-jobs",
+    ".similar-jobs",
+    ".recommended-jobs",
+    "#related-jobs",
+    "#similar-jobs",
+    "#recommended-jobs",
+)
+
 
 class GenericContentExtractionError(ValueError):
     """ "raised when useful content cannot be extracted from html"""
+
+
+def _validate_target_job_content(soup: BeautifulSoup) -> None:
+    """Reject pages whose target job description is not loaded."""
+    description = soup.select_one("descriptif-offre")
+
+    if description is not None:
+        text = description.get_text(" ", strip=True)
+
+        if not text:
+            raise GenericContentExtractionError(
+                "The target job description is unavailable in the "
+                "initial HTML and may require JavaScript rendering."
+            )
+
+
+def _remove_related_job_sections(soup: BeautifulSoup) -> None:
+    """Remove identifiable containers of unrelated job postings."""
+    for selector in _RELATED_JOB_SELECTORS:
+        for element in soup.select(selector):
+            element.decompose()
 
 
 def extract_generic_job_content(
@@ -35,10 +66,14 @@ def extract_generic_job_content(
     if not html.strip():
         raise GenericContentExtractionError("The job page contains no HTML content.")
     soup = BeautifulSoup(html, "html.parser")
+    _validate_target_job_content(soup)
+
     page_title = _extract_page_title(soup)
     metadata = _extract_page_metadata(soup)
+
+    _remove_related_job_sections(soup)
     extracted_text = extract(
-        html,
+        str(soup),
         output_format="txt",
         include_comments=False,
         include_tables=False,

@@ -609,7 +609,6 @@ def test_ollama_job_extraction_client() -> None:
                     "title": "Junior Data Engineer",
                     "company": "Example Company",
                     "location": "Paris, France",
-                    "description": "Build reliable data pipelines.",
                     "employment_types": ["FULL_TIME"],
                     "requirements": {
                         "required_skills": [
@@ -631,14 +630,11 @@ def test_ollama_job_extraction_client() -> None:
                         "Teamwork"
                         ],
                         "languages": [
-                        "French",
-                        "English",
-                        "french"
-                        ]
-                    },
-                    "date_posted": null,
-                    "valid_through": null,
-                    "application_url": "https://invented.example.com"
+                            "French",
+                            "English",
+                            "french"
+                            ]
+                        }
                     }
                     """
                 )
@@ -681,6 +677,16 @@ def test_ollama_job_extraction_client() -> None:
     assert job.company == "Example Company"
     assert job.location == "Paris, France"
     assert job.employment_types == ["FULL_TIME"]
+    assert job.description == (
+        "Example Company is looking for a Junior Data "
+        "Engineer to build reliable Python and SQL data "
+        "pipelines. The candidate will validate data "
+        "quality, maintain APIs, write automated tests, "
+        "and collaborate with engineering teams. This "
+        "is a full-time role based in Paris, France."
+    )
+    assert job.date_posted is None
+    assert job.valid_through is None
 
     # JobMatch must use the trusted source URL, not the
     # URL returned by the model.
@@ -691,6 +697,10 @@ def test_ollama_job_extraction_client() -> None:
     assert fake_client.received_model == "test-model"
     assert fake_client.received_messages is not None
     assert fake_client.received_format is not None
+    properties = fake_client.received_format["properties"]
+    assert "application_url" not in properties
+    assert "date_posted" not in properties
+    assert "valid_through" not in properties
     assert job.requirements.required_skills == [
         "Python",
         "SQL",
@@ -758,3 +768,261 @@ def test_job_schema_repairs_mojibake_in_model_output() -> None:
     assert job.requirements.required_skills == [
         "Ma\u00eetrise du d\u00e9veloppement",
     ]
+
+
+def test_generic_content_rejects_missing_target_description() -> None:
+    html = """
+    <html>
+        <head>
+            <title>
+                Physical AI Engineer - Rennes
+            </title>
+        </head>
+        <body>
+            <main>
+                <h1>Physical AI Engineer</h1>
+                <div class="location">Rennes</div>
+
+                <div itemscope
+                     itemtype="https://schema.org/JobPosting">
+                    <descriptif-offre id-offre="123456">
+                    </descriptif-offre>
+                </div>
+
+                <section class="block-other-offers">
+                    <h2>D'autres offres peuvent vous intéresser :</h2>
+
+                    <article>
+                        <h3>Industrial Electrician</h3>
+                        <p>
+                            Install and maintain industrial electrical
+                            equipment. Experience with electrical
+                            maintenance and industrial automation
+                            is required.
+                        </p>
+                    </article>
+
+                    <article>
+                        <h3>Laboratory Technician</h3>
+                        <p>
+                            Perform laboratory quality control,
+                            chemical analysis and equipment
+                            calibration. Previous laboratory
+                            experience is required.
+                        </p>
+                    </article>
+                </section>
+            </main>
+        </body>
+    </html>
+    """
+
+    with pytest.raises(GenericContentExtractionError):
+        extract_generic_job_content(
+            html,
+            "https://example.com/jobs/123456",
+        )
+
+
+def test_generic_content_accepts_populated_target_description() -> None:
+    html = """
+    <html>
+        <head>
+            <title>Physical AI Engineer - Rennes</title>
+        </head>
+        <body>
+            <main>
+                <h1>Physical AI Engineer</h1>
+
+                <div itemscope
+                     itemtype="https://schema.org/JobPosting">
+                    <descriptif-offre id-offre="123456">
+                        <h2>Job description</h2>
+                        <p>
+                            We are looking for a Physical AI Engineer
+                            to develop intelligent robotic systems.
+                            The successful candidate will design and
+                            implement machine learning algorithms
+                            for autonomous robots.
+                        </p>
+
+                        <h2>Required skills</h2>
+                        <p>
+                            Experience with Python, PyTorch and ROS2
+                            is required. Knowledge of reinforcement
+                            learning and robotic simulation is
+                            highly desirable.
+                        </p>
+                    </descriptif-offre>
+                </div>
+            </main>
+        </body>
+    </html>
+    """
+
+    content = extract_generic_job_content(
+        html,
+        "https://example.com/jobs/123456",
+    )
+
+    assert "Python" in content.text
+    assert "PyTorch" in content.text
+    assert "ROS2" in content.text
+
+
+def test_generic_content_excludes_related_job_postings() -> None:
+    html = """
+    <html>
+        <head>
+            <title>Python AI Engineer - Rennes</title>
+        </head>
+        <body>
+            <main>
+                <article>
+                    <h1>Python AI Engineer</h1>
+
+                    <h2>Job description</h2>
+                    <p>
+                        We are looking for a Python AI Engineer
+                        to develop and maintain local inference
+                        platforms for industrial applications.
+                        You will design REST APIs and integrate
+                        open-source language models.
+                    </p>
+
+                    <h2>Required skills</h2>
+                    <p>
+                        Experience with Python, FastAPI, Docker
+                        and Hugging Face is required. The candidate
+                        should also have knowledge of automated
+                        testing and software architecture.
+                    </p>
+                </article>
+
+                <section class="block-other-offers">
+                    <h2>D'autres offres peuvent vous intéresser :</h2>
+
+                    <article>
+                        <h3>Industrial Electrician</h3>
+                        <p>
+                            Experience with electrical wiring,
+                            industrial maintenance and electrical
+                            equipment installation is required.
+                        </p>
+                    </article>
+
+                    <article>
+                        <h3>Java Backend Developer</h3>
+                        <p>
+                            Required skills include Java,
+                            Spring Boot, Hibernate and Maven.
+                            Experience developing enterprise
+                            applications is essential.
+                        </p>
+                    </article>
+                </section>
+            </main>
+        </body>
+    </html>
+    """
+
+    content = extract_generic_job_content(
+        html,
+        "https://example.com/jobs/python-ai-engineer",
+    )
+
+    assert "Python" in content.text
+    assert "FastAPI" in content.text
+    assert "Docker" in content.text
+    assert "Hugging Face" in content.text
+
+    assert "Industrial Electrician" not in content.text
+    assert "electrical wiring" not in content.text
+    assert "Java Backend Developer" not in content.text
+    assert "Spring Boot" not in content.text
+    assert "Hibernate" not in content.text
+
+
+def test_generic_content_excludes_nested_job_recommendations() -> None:
+    html = """
+    <html>
+        <head>
+            <title>Python AI Engineer - Rennes</title>
+        </head>
+        <body>
+            <main>
+                <div class="modal-body"
+                     itemscope
+                     itemtype="https://schema.org/JobPosting">
+
+                    <div class="job-description">
+                        <h1>Python AI Engineer</h1>
+                        <p>
+                            We are looking for a Python AI Engineer
+                            to develop local inference platforms.
+                            You will design REST APIs, integrate
+                            language models and maintain reliable
+                            software components.
+                        </p>
+                        <h2>Required skills</h2>
+                        <p>
+                            Experience with Python, FastAPI, Docker
+                            and Hugging Face is required.
+                            Knowledge of automated testing and
+                            software architecture is desirable.
+                        </p>
+                    </div>
+
+                    <div class="block-other-offers with-header results">
+                        <h2>D'autres offres peuvent vous intéresser :</h2>
+
+                        <div class="other-offers-container">
+                            <ul class="result-list">
+                                <li class="result">
+                                    <div class="media-body">
+                                        <h2>Industrial Electrician</h2>
+                                        <p class="description">
+                                            Install and maintain electrical
+                                            equipment in industrial facilities.
+                                            Experience with electrical wiring,
+                                            maintenance and power distribution
+                                            is required.
+                                        </p>
+                                    </div>
+                                </li>
+                                <li class="result">
+                                    <div class="media-body">
+                                        <h2>Java Backend Developer</h2>
+                                        <p class="description">
+                                            Develop enterprise applications
+                                            using Java, Spring Boot, Hibernate
+                                            and Maven. Previous experience
+                                            with Java development and database
+                                            integration is required.
+                                        </p>
+                                    </div>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </body>
+    </html>
+    """
+
+    content = extract_generic_job_content(
+        html,
+        "https://example.com/jobs/python-ai-engineer",
+    )
+
+    assert "Python" in content.text
+    assert "FastAPI" in content.text
+    assert "Docker" in content.text
+    assert "Hugging Face" in content.text
+
+    assert "Industrial Electrician" not in content.text
+    assert "electrical wiring" not in content.text
+    assert "Java Backend Developer" not in content.text
+    assert "Spring Boot" not in content.text
+    assert "Hibernate" not in content.text

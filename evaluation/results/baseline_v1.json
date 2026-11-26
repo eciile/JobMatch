@@ -1,0 +1,35 @@
+{
+  "version": "v1",
+  "model": "qwen3:4b-instruct-2507-q4_K_M",
+  "hardware": "NVIDIA GeForce RTX 5060 8GB",
+  "evaluation_date": "2026-11-26",
+  "configuration": {
+    "temperature": 0,
+    "num_ctx": 8192,
+    "num_predict": 2048,
+    "max_input_characters": 8000
+  },
+  "dataset_size": 6,
+  "matching_method": "normalized_exact_match",
+  "successful_extractions": 6,
+  "failed_extractions": 0,
+  "success_rate": 1.0,
+  "exact_match_rate": 0.0,
+  "mean_latency_seconds": 3.33,
+  "global_metrics": {
+    "true_positives": 19,
+    "false_positives": 17,
+    "false_negatives": 9,
+    "precision": 0.5278,
+    "recall": 0.6786,
+    "f1": 0.5937
+  },
+  "category_f1": {
+    "required_skills": 0.7586,
+    "preferred_skills": 1.0,
+    "qualifications": 0.0,
+    "soft_skills": 0.2857,
+    "languages": 0.6667
+  },
+  "notes": "Combined extraction changes produced a regression in normalized exact-match F1 compared with V0."
+}

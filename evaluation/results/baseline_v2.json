@@ -1,0 +1,34 @@
+{
+  "version": "v2",
+  "model": "qwen3:4b-instruct-2507-q4_K_M",
+  "hardware": "NVIDIA GeForce RTX 5060 8GB",
+  "evaluation_date": "2026-11-26",
+  "configuration": {
+    "temperature": 0,
+    "num_ctx": 8192,
+    "num_predict": 2048,
+    "max_input_characters": 8000
+  },
+  "dataset_size": 6,
+  "matching_method": "normalized_exact_match",
+  "successful_extractions": 6,
+  "failed_extractions": 0,
+  "success_rate": 1.0,
+  "exact_match_rate": 0.0,
+  "mean_latency_seconds": 2.43,
+  "global_metrics": {
+    "true_positives": 20,
+    "false_positives": 13,
+    "false_negatives": 8,
+    "precision": 0.6061,
+    "recall": 0.7143,
+    "f1": 0.6557
+  },
+  "category_f1": {
+    "required_skills": 0.8148,
+    "preferred_skills": 1.0,
+    "qualifications": 0.0,
+    "soft_skills": 0.5714,
+    "languages": 0.5
+  }
+}

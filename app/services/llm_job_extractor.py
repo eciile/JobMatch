@@ -6,7 +6,7 @@ from typing import Literal
 
 import httpx
 from ollama import AsyncClient, ResponseError
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.config import Settings, get_settings
 from app.schemas import (
@@ -16,7 +16,7 @@ from app.schemas import (
 )
 from app.text_utils import repair_utf8_mojibake
 
-MAX_INPUT_CHARACTERS = 4_000
+MAX_INPUT_CHARACTERS = 8_000
 REQUIREMENTS_SECTION_START_MARKERS = (
     "minimum qualifications",
     "required qualifications",
@@ -33,6 +33,13 @@ REQUIREMENTS_SECTION_START_MARKERS = (
     "about you",
     "who you are",
     "requirements",
+    "\nprofil\n",
+    "\nprofil recherché",
+    "\nprofil souhaité",
+    "\nvotre profil",
+    "ce que vous apportez",
+    "compétences requises",
+    "qualifications requises",
 )
 REQUIREMENTS_SECTION_END_MARKERS = (
     "what's in it for you",
@@ -45,6 +52,12 @@ REQUIREMENTS_SECTION_END_MARKERS = (
     "about the company",
     "about us",
     "equal opportunity",
+    "critères de l'offre",
+    "critères de l’offre",
+    "l'employeur",
+    "l’employeur",
+    "ce que nous offrons",
+    "nos avantages",
 )
 OPTIONAL_REQUIREMENTS_MARKERS = (
     "nice to have",
@@ -53,13 +66,19 @@ OPTIONAL_REQUIREMENTS_MARKERS = (
     "preferred skills",
     "bonus points",
     "as a bonus",
+    "compétences appréciées",
+    "compétences souhaitées",
+    "atouts supplémentaires",
 )
 SYSTEM_PROMPT = """
 You extract structured information from job advertisements.
 
 Rules:
 - Use only information explicitly present in the provided content.
-- Never invent company names, locations, dates, or employment types.
+- Never invent company names, locations, or employment types.
+- Application URLs and dates are managed by the application.
+- Do not generate application URLs, publication dates,
+  or expiration dates.
 - Extract employment type whenever terms such as full-time,
   part-time, permanent, temporary, contract, internship,
   apprenticeship, freelance, or fixed-term are explicitly stated.
@@ -120,13 +139,28 @@ Rules:
   preferred_skills.
 - Return null for unavailable optional values.
 - Return an empty list when employment type is unavailable.
-- Keep the description concise but faithful to the source.
+- The original description is preserved by the application.
+- Do not generate a description.
 - Return only data matching the requested JSON schema.
 """.strip()
 
 
 class LlmJobExtractionError(ValueError):
     """raised when the LLM fails to produce a valid job posting"""
+
+
+class LlmExtractedJob(BaseModel):
+    """Internal generation schema for LLM-based job extraction."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1)
+    company: str | None = None
+    location: str | None = None
+    employment_types: list[str] = Field(default_factory=list)
+    requirements: JobRequirements = Field(
+        default_factory=JobRequirements,
+    )
 
 
 class CategorizedRequirement(BaseModel):
@@ -160,15 +194,26 @@ class OllamaJobExtractionClient:
             timeout=self.settings.ollama_timeout_seconds,
         )
 
+    def _generation_options(self) -> dict[str, int | float]:
+        """Return configured inference parameters."""
+
+        return {
+            "temperature": self.settings.ollama_temperature,
+            "num_ctx": self.settings.ollama_num_ctx,
+            "num_predict": self.settings.ollama_num_predict,
+        }
+
     async def extract_job(
         self,
         content: GenericJobContent,
     ) -> ExtractedJobPosting:
         """Convert cleaned page content into structured job data."""
 
-        schema = ExtractedJobPosting.model_json_schema()
-
-        prompt = _build_prompt(content)
+        schema = LlmExtractedJob.model_json_schema()
+        prompt = _build_prompt(
+            content,
+            max_input_characters=self.settings.llm_max_input_characters,
+        )
 
         try:
             response = await self.client.chat(
@@ -184,11 +229,7 @@ class OllamaJobExtractionClient:
                     },
                 ],
                 format=schema,
-                options={
-                    "temperature": 0,
-                    "num_ctx": 4096,
-                    "num_predict": 512,
-                },
+                options=self._generation_options(),
                 think=False,
                 stream=False,
                 keep_alive="10m",
@@ -236,10 +277,19 @@ class OllamaJobExtractionClient:
 
         # The source URL is controlled by JobMatch. Do not trust the
         # model to generate or reproduce an application URL.
-        payload["application_url"] = content.source_url
-
         try:
-            job = ExtractedJobPosting.model_validate(payload)
+            generated_job = LlmExtractedJob.model_validate(payload)
+
+            job = ExtractedJobPosting.model_validate(
+                {
+                    **generated_job.model_dump(),
+                    "description": content.text,
+                    "application_url": content.source_url,
+                    "date_posted": content.metadata.get("date_posted"),
+                    "valid_through": content.metadata.get("valid_through"),
+                }
+            )
+
         except ValidationError as exc:
             raise LlmJobExtractionError(
                 "Ollama returned job data that failed validation."
@@ -260,10 +310,6 @@ class OllamaJobExtractionClient:
         if any(marker in normalized_title for marker in generic_title_markers):
             raise LlmJobExtractionError("Ollama did not extract a specific job title.")
 
-        if not job.description:
-            job = job.model_copy(
-                update={"description": _build_description_fallback(content.text)}
-            )
         return job
 
     async def extract_requirements(
@@ -286,7 +332,7 @@ class OllamaJobExtractionClient:
 
         Candidate criteria:
         --- BEGIN CRITERIA ---
-        {requirements_text[:MAX_INPUT_CHARACTERS]}
+        {requirements_text[: self.settings.llm_max_input_characters]}     
         --- END CRITERIA ---
 
         Categories:
@@ -329,10 +375,10 @@ class OllamaJobExtractionClient:
           background and theoretical-knowledge qualifications.
 
         Account for every explicit criterion. Preserve exact numbers and do
-        not copy durations from examples. Split alternatives and named
-        technologies into atomic items. Do not output both a short and long
-        version of the same criterion within one category. Do not infer
-        missing criteria.
+        not copy durations from examples. Split distinct technical skills
+        into atomic items. Preserve alternatives within formal
+        qualifications. Do not output both a short and long version of the
+        same criterion within one category. Do not infer missing criteria.
         """.strip()
 
         try:
@@ -352,11 +398,7 @@ class OllamaJobExtractionClient:
                     },
                 ],
                 format=CategorizedRequirements.model_json_schema(),
-                options={
-                    "temperature": 0,
-                    "num_ctx": 4096,
-                    "num_predict": 512,
-                },
+                options=self._generation_options(),
                 think=False,
                 stream=False,
                 keep_alive="10m",
@@ -468,8 +510,9 @@ def _label_requirement_priority(text: str) -> str:
 
 def _build_prompt(
     content: GenericJobContent,
+    max_input_characters: int = MAX_INPUT_CHARACTERS,
 ) -> str:
-    page_text = content.text[:MAX_INPUT_CHARACTERS]
+    page_text = content.text[:max_input_characters]
     page_title = content.page_title or "Unavailable"
 
     metadata_lines = [f"- {key}: {value}" for key, value in content.metadata.items()]
@@ -505,33 +548,6 @@ def _build_prompt(
     - Map stage to INTERNSHIP.
     - Map alternance to APPRENTICESHIP.
     """.strip()
-
-
-def _build_description_fallback(
-    text: str,
-    max_characters: int = 1_500,
-) -> str:
-    """
-    Build a faithful description from cleaned page content.
-
-    This avoids rejecting an otherwise useful extraction when
-    the model leaves the description empty.
-    """
-
-    cleaned = " ".join(text.split())
-
-    if len(cleaned) <= max_characters:
-        return cleaned
-
-    shortened = cleaned[:max_characters]
-
-    # Prefer ending on a complete sentence when possible.
-    last_period = shortened.rfind(".")
-
-    if last_period >= max_characters // 2:
-        return shortened[: last_period + 1]
-
-    return shortened.rstrip() + "..."
 
 
 @lru_cache
