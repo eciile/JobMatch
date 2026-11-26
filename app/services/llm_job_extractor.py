@@ -160,6 +160,15 @@ class OllamaJobExtractionClient:
             timeout=self.settings.ollama_timeout_seconds,
         )
 
+    def _generation_options(self) -> dict[str, int | float]:
+        """Return configured inference parameters."""
+
+        return {
+            "temperature": self.settings.ollama_temperature,
+            "num_ctx": self.settings.ollama_num_ctx,
+            "num_predict": self.settings.ollama_num_predict,
+        }
+
     async def extract_job(
         self,
         content: GenericJobContent,
@@ -168,7 +177,10 @@ class OllamaJobExtractionClient:
 
         schema = ExtractedJobPosting.model_json_schema()
 
-        prompt = _build_prompt(content)
+        prompt = _build_prompt(
+            content,
+            max_input_characters=self.settings.llm_max_input_characters,
+        )
 
         try:
             response = await self.client.chat(
@@ -184,11 +196,7 @@ class OllamaJobExtractionClient:
                     },
                 ],
                 format=schema,
-                options={
-                    "temperature": 0,
-                    "num_ctx": 4096,
-                    "num_predict": 512,
-                },
+                options=self._generation_options(),
                 think=False,
                 stream=False,
                 keep_alive="10m",
@@ -286,8 +294,7 @@ class OllamaJobExtractionClient:
 
         Candidate criteria:
         --- BEGIN CRITERIA ---
-        {requirements_text[:MAX_INPUT_CHARACTERS]}
-        --- END CRITERIA ---
+        {requirements_text[: self.settings.llm_max_input_characters]}        --- END CRITERIA ---
 
         Categories:
         - required_skills: named technologies and practical technical
@@ -352,11 +359,7 @@ class OllamaJobExtractionClient:
                     },
                 ],
                 format=CategorizedRequirements.model_json_schema(),
-                options={
-                    "temperature": 0,
-                    "num_ctx": 4096,
-                    "num_predict": 512,
-                },
+                options=self._generation_options(),
                 think=False,
                 stream=False,
                 keep_alive="10m",
@@ -468,8 +471,9 @@ def _label_requirement_priority(text: str) -> str:
 
 def _build_prompt(
     content: GenericJobContent,
+    max_input_characters: int = MAX_INPUT_CHARACTERS,
 ) -> str:
-    page_text = content.text[:MAX_INPUT_CHARACTERS]
+    page_text = content.text[:max_input_characters]
     page_title = content.page_title or "Unavailable"
 
     metadata_lines = [f"- {key}: {value}" for key, value in content.metadata.items()]

@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,6 +15,26 @@ class Settings(BaseSettings):
     ollama_host: str = "http://localhost:11434"
     ollama_model: str = "qwen3:4b"
     ollama_timeout_seconds: float = 60.0
+    ollama_temperature: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=2.0,
+    )
+
+    ollama_num_ctx: int = Field(
+        default=4096,
+        gt=0,
+    )
+
+    ollama_num_predict: int = Field(
+        default=512,
+        gt=0,
+    )
+
+    llm_max_input_characters: int = Field(
+        default=4000,
+        ge=200,
+    )
 
 
 @lru_cache

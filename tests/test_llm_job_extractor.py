@@ -2,6 +2,9 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+import pytest
+from pydantic import ValidationError
+
 from app.config import Settings
 from app.services.llm_job_extractor import (
     OllamaJobExtractionClient,
@@ -112,3 +115,59 @@ def test_select_requirements_text_excludes_company_stack() -> None:
     assert "MAIN CANDIDATE CRITERIA:" in labeled
     assert "OPTIONAL / NICE-TO-HAVE CRITERIA:" in labeled
     assert "Vertex AI, AWS Bedrock, and PyTorch" in labeled
+
+
+def test_llm_default_generation_options() -> None:
+    settings = Settings(
+        _env_file=None,
+        ollama_temperature=0.0,
+        ollama_num_ctx=4096,
+        ollama_num_predict=512,
+        llm_max_input_characters=4000,
+    )
+
+    client = OllamaJobExtractionClient(settings=settings)
+
+    assert client._generation_options() == {
+        "temperature": 0.0,
+        "num_ctx": 4096,
+        "num_predict": 512,
+    }
+
+
+def test_llm_custom_generation_options() -> None:
+    settings = Settings(
+        _env_file=None,
+        ollama_temperature=0.2,
+        ollama_num_ctx=8192,
+        ollama_num_predict=2048,
+        llm_max_input_characters=8000,
+    )
+
+    client = OllamaJobExtractionClient(settings=settings)
+
+    assert client._generation_options() == {
+        "temperature": 0.2,
+        "num_ctx": 8192,
+        "num_predict": 2048,
+    }
+
+    assert settings.llm_max_input_characters == 8000
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("ollama_temperature", -0.1),
+        ("ollama_temperature", 2.1),
+        ("ollama_num_ctx", 0),
+        ("ollama_num_predict", 0),
+        ("llm_max_input_characters", 199),
+    ],
+)
+def test_llm_rejects_invalid_configuration(
+    field: str,
+    value: float,
+) -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **{field: value})
