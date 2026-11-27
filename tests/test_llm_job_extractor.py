@@ -6,8 +6,10 @@ import pytest
 from pydantic import ValidationError
 
 from app.config import Settings
+from app.inference.ollama_provider import OllamaProvider
 from app.services.llm_job_extractor import (
-    OllamaJobExtractionClient,
+    JobExtractionService,
+    LlmExtractedJob,
     _label_requirement_priority,
     _select_requirements_text,
 )
@@ -59,10 +61,14 @@ def test_extract_requirements_returns_validated_requirements() -> None:
                 )
             )
 
-    ollama_client = FakeOllamaClient()
-    extractor = OllamaJobExtractionClient(
-        settings=Settings(ollama_model="test-model"),
-        client=ollama_client,
+    fake_client = FakeOllamaClient()
+    settings = Settings(ollama_model="test-model")
+    extractor = JobExtractionService(
+        provider=OllamaProvider(
+            settings=settings,
+            client=fake_client,
+        ),
+        settings=settings,
     )
 
     requirements = asyncio.run(
@@ -77,10 +83,10 @@ def test_extract_requirements_returns_validated_requirements() -> None:
     assert requirements.qualifications == ["3 years experience"]
     assert requirements.soft_skills == ["Communication"]
     assert requirements.languages == ["English"]
-    assert ollama_client.request is not None
-    assert ollama_client.request["model"] == "test-model"
-    assert "Data Engineer" in (ollama_client.request["messages"][1]["content"])
-    prompt = ollama_client.request["messages"][1]["content"]
+    assert fake_client.request is not None
+    assert fake_client.request["model"] == "test-model"
+    assert "Data Engineer" in fake_client.request["messages"][1]["content"]
+    prompt = fake_client.request["messages"][1]["content"]
     assert "Return every explicit candidate criterion" in prompt
     assert "MAIN CANDIDATE CRITERIA" in prompt
     assert "OPTIONAL / NICE-TO-HAVE CRITERIA" in prompt
@@ -88,8 +94,8 @@ def test_extract_requirements_returns_validated_requirements() -> None:
     assert "named technical subject" in prompt
     assert "N+ years X experience" in prompt
     assert 'never the incomplete value "LLM"' in prompt
-    assert ollama_client.request["format"]["title"] == ("CategorizedRequirements")
-    assert "items" in ollama_client.request["format"]["properties"]
+    assert fake_client.request["format"]["title"] == "CategorizedRequirements"
+    assert "items" in fake_client.request["format"]["properties"]
 
 
 def test_select_requirements_text_excludes_company_stack() -> None:
@@ -126,7 +132,7 @@ def test_llm_default_generation_options() -> None:
         llm_max_input_characters=4000,
     )
 
-    client = OllamaJobExtractionClient(settings=settings)
+    client = OllamaProvider(settings=settings)
 
     assert client._generation_options() == {
         "temperature": 0.0,
@@ -144,7 +150,7 @@ def test_llm_custom_generation_options() -> None:
         llm_max_input_characters=8000,
     )
 
-    client = OllamaJobExtractionClient(settings=settings)
+    client = OllamaProvider(settings=settings)
 
     assert client._generation_options() == {
         "temperature": 0.2,
@@ -170,4 +176,74 @@ def test_llm_rejects_invalid_configuration(
     value: float,
 ) -> None:
     with pytest.raises(ValidationError):
-        Settings(_env_file=None, **{field: value})
+        Settings(**{"_env_file": None, field: value})
+
+
+def test_llm_generation_schema_excludes_deterministic_fields() -> None:
+    schema = LlmExtractedJob.model_json_schema()
+    properties = schema["properties"]
+
+    assert "application_url" not in properties
+    assert "date_posted" not in properties
+    assert "valid_through" not in properties
+    assert "description" not in properties
+    assert schema["additionalProperties"] is False
+
+
+def test_llm_generation_schema_retains_semantic_fields() -> None:
+    properties = LlmExtractedJob.model_json_schema()["properties"]
+
+    assert set(properties) == {
+        "title",
+        "company",
+        "location",
+        "employment_types",
+        "requirements",
+    }
+
+
+def test_llm_generation_schema_rejects_unexpected_fields() -> None:
+    with pytest.raises(ValidationError):
+        LlmExtractedJob.model_validate(
+            {
+                "title": "AI Engineer",
+                "application_url": "https://example.com/job",
+                "valid_through": "2026-12-31",
+            }
+        )
+
+
+def test_extraction_service_accepts_independent_provider() -> None:
+    class FakeProvider:
+        async def generate(
+            self,
+            *,
+            system_prompt: str,
+            user_prompt: str,
+            schema: dict,
+        ) -> str:
+            return """
+            {
+                "items": [
+                    {
+                        "value": "Python",
+                        "category": "required_skills"
+                    },
+                    {
+                        "value": "Docker",
+                        "category": "preferred_skills"
+                    }
+                ]
+            }
+            """
+
+    service = JobExtractionService(provider=FakeProvider())
+    requirements = asyncio.run(
+        service.extract_requirements(
+            title="Python Engineer",
+            description="Python is required. Docker is desirable.",
+        )
+    )
+
+    assert requirements.required_skills == ["Python"]
+    assert requirements.preferred_skills == ["Docker"]

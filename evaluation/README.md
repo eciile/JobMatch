@@ -1,83 +1,60 @@
-# JobMatch Extraction Evaluation
+# JobMatch — LLM Evaluation
 
 ## Objective
 
-Evaluate the accuracy, reliability and latency of LLM-based job requirement extraction independently of webpage retrieval and candidate matching.
+Evaluate LLM-based requirements extraction and compare inference providers, models and generation configurations independently of webpage retrieval and candidate matching.
 
 ## Dataset
 
-The initial development dataset contains six synthetic French and English job advertisements with manually annotated expected requirements.
+`datasets/job_requirements.jsonl` contains six synthetic French and English job advertisements with manually annotated required skills, preferred skills, qualifications, soft skills and languages.
 
-Each sample contains:
+## Usage
 
-- A unique identifier.
-- The advertisement language.
-- The job title and description.
-- Expected required skills, preferred skills, qualifications, soft skills and languages.
-
-## Execution
-
-Run from the repository root with Ollama running and the configured model available:
+From the repository root, with the configured inference server running:
 
 ```bash
 python -m evaluation.evaluate_extraction
 ```
 
+The evaluation runner uses the application's configured inference provider.
+
 ## Metrics
 
 - Micro-averaged precision, recall and F1-score.
-- Per-category extraction metrics.
-- Extraction success rate.
-- Exact match rate.
-- Mean extraction latency.
+- Per-category extraction performance.
+- Extraction success and exact match rates.
+- End-to-end inference latency.
 - False positives and false negatives.
 
-## Initial baseline
+## Results
 
-Model: `qwen3:4b-instruct-2507-q4_K_M`
+Model: `qwen3:4b-instruct-2507-q4_K_M`  
+Hardware: NVIDIA GeForce RTX 5060 (8 GB VRAM).
 
-Hardware: NVIDIA GeForce RTX 5060 8 GB.
+| Experiment | Precision | Recall | F1 | Mean latency |
+|---|---:|---:|---:|---:|
+| V0 — Initial baseline | 57.14% | 71.43% | 63.49% | 2.98 s |
+| V1 — Extended prompt | 52.78% | 67.86% | 59.37% | 3.33 s |
+| V2 — Revised prompt | 60.61% | 71.43% | 65.57% | 2.43 s |
+| Modular Ollama — Cold start | 57.58% | 67.86% | 62.30% | 4.17 s |
+| Modular Ollama — Warm | 57.58% | 67.86% | 62.30% | 1.54 s |
 
-| Metric | Baseline V0 |
-|---|---:|
-| Precision | 57.14% |
-| Recall | 71.43% |
-| F1-score | 63.49% |
-| Extraction success rate | 100% |
-| Exact match rate | 0% |
-| Mean latency | 2.98 s |
+All recorded runs achieved a 100% extraction success rate.
 
-Baseline results are stored in `results/baseline_v0.json`.
+Detailed configurations and results are stored in [`results/`](results/).
 
 ## Limitations
 
-The initial dataset is small and synthetic. Results must not be interpreted as general real-world extraction accuracy.
+- The small synthetic dataset is not representative of real-world extraction accuracy.
+- Exact matching may penalize semantically equivalent expressions.
+- Successful extraction does not guarantee semantic correctness.
+- Latency depends on model-loading conditions and runtime configuration.
 
-Normalized exact matching may penalize semantically equivalent expressions. Extraction success indicates successful parsing and validation, not semantic correctness.
+## Future Work
 
-Latency measurements may include model loading and request overhead.
+- Compare Ollama, llama.cpp and vLLM.
+- Measure throughput, time to first token, VRAM usage and concurrency.
+- Establish reproducible cold-start and warm inference benchmarks.
+- Expand the evaluation dataset.
 
-Live evaluation requires a running inference server and is kept separate from deterministic automated tests.
-
-## Future improvements
-
-- Expand French and English real-world evaluation samples.
-- Evaluate metadata extraction independently.
-- Introduce explicitly documented semantic equivalences.
-- Record token usage and inference throughput.
-- Compare inference providers and model configurations.
-- Introduce repeatable performance benchmarking.
-## Known Limitations
-
-- The quantized 4B model may confuse company technology
-  stacks with explicit candidate requirements.
-- Alternative qualifications and experience thresholds
-  are not always preserved correctly.
-- Normalized exact matching may penalize semantically
-  equivalent expressions.
-- JavaScript-rendered job advertisements may require
-  browser-based retrieval. A Playwright proof of concept
-  was validated, but production integration is deferred
-  until appropriate network isolation is implemented.
-- Extraction quality remains model-dependent and will
-  be evaluated across future inference providers.
+See the [Inference Architecture](../docs/inference-architecture.md) for implementation details.
