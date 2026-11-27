@@ -5,16 +5,15 @@ Revises: b842d50d4d68
 Create Date: 2026-08-04
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision: str = "c31a76e21f04"
-down_revision: Union[str, Sequence[str], None] = "b842d50d4d68"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = "b842d50d4d68"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
