@@ -4,11 +4,11 @@ import json
 from functools import lru_cache
 from typing import Literal
 
-import httpx
-from ollama import AsyncClient, ResponseError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.config import Settings, get_settings
+from app.inference.base import LLMProvider, LLMProviderError
+from app.inference.factory import create_llm_provider
 from app.schemas import (
     ExtractedJobPosting,
     GenericJobContent,
@@ -182,26 +182,16 @@ class CategorizedRequirements(BaseModel):
     items: list[CategorizedRequirement]
 
 
-class OllamaJobExtractionClient:
-    """extract structured job data using a local Ollama model"""
+class JobExtractionService:
+    """Extract structured job data using an inference provider."""
 
     def __init__(
-        self, settings: Settings | None = None, client: AsyncClient | None = None
+        self,
+        provider: LLMProvider,
+        settings: Settings | None = None,
     ) -> None:
+        self.provider = provider
         self.settings = settings or get_settings()
-        self.client = client or AsyncClient(
-            host=self.settings.ollama_host,
-            timeout=self.settings.ollama_timeout_seconds,
-        )
-
-    def _generation_options(self) -> dict[str, int | float]:
-        """Return configured inference parameters."""
-
-        return {
-            "temperature": self.settings.ollama_temperature,
-            "num_ctx": self.settings.ollama_num_ctx,
-            "num_predict": self.settings.ollama_num_predict,
-        }
 
     async def extract_job(
         self,
@@ -216,64 +206,27 @@ class OllamaJobExtractionClient:
         )
 
         try:
-            response = await self.client.chat(
-                model=self.settings.ollama_model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": SYSTEM_PROMPT,
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    },
-                ],
-                format=schema,
-                options=self._generation_options(),
-                think=False,
-                stream=False,
-                keep_alive="10m",
+            raw_content = await self.provider.generate(
+                system_prompt=SYSTEM_PROMPT,
+                user_prompt=prompt,
+                schema=schema,
             )
-
-        except ResponseError as exc:
-            raise LlmJobExtractionError(
-                f"Ollama returned an error: {exc.error}"
-            ) from exc
-
-        except httpx.TimeoutException as exc:
-            raise LlmJobExtractionError(
-                "Ollama did not finish extraction before the timeout."
-            ) from exc
-
-        except httpx.ConnectError as exc:
-            raise LlmJobExtractionError(
-                "JobMatch could not connect to the Ollama server."
-            ) from exc
-
-        except httpx.HTTPError as exc:
-            raise LlmJobExtractionError(
-                f"Ollama request failed: {type(exc).__name__}."
-            ) from exc
-
-        except ConnectionError as exc:
-            raise LlmJobExtractionError(
-                "JobMatch could not connect to the Ollama server."
-            ) from exc
-
-        raw_content = response.message.content
-
-        if not raw_content or not raw_content.strip():
-            raise LlmJobExtractionError("Ollama returned an empty response.")
+        except LLMProviderError as exc:
+            raise LlmJobExtractionError(str(exc)) from exc
 
         raw_content = repair_utf8_mojibake(raw_content)
 
         try:
             payload = json.loads(raw_content)
         except json.JSONDecodeError as exc:
-            raise LlmJobExtractionError("Ollama returned invalid JSON.") from exc
+            raise LlmJobExtractionError(
+                "The inference provider returned invalid JSON."
+            ) from exc
 
         if not isinstance(payload, dict):
-            raise LlmJobExtractionError("Ollama returned an unexpected JSON structure.")
+            raise LlmJobExtractionError(
+                "The inference provider returned an unexpected JSON structure."
+            )
 
         # The source URL is controlled by JobMatch. Do not trust the
         # model to generate or reproduce an application URL.
@@ -292,7 +245,7 @@ class OllamaJobExtractionClient:
 
         except ValidationError as exc:
             raise LlmJobExtractionError(
-                "Ollama returned job data that failed validation."
+                "The inference provider returned job data that failed validation."
             ) from exc
 
         generic_title_markers = {
@@ -308,7 +261,9 @@ class OllamaJobExtractionClient:
         normalized_title = job.title.casefold()
 
         if any(marker in normalized_title for marker in generic_title_markers):
-            raise LlmJobExtractionError("Ollama did not extract a specific job title.")
+            raise LlmJobExtractionError(
+                "The inference provider did not extract a specific job title."
+            )
 
         return job
 
@@ -382,52 +337,16 @@ class OllamaJobExtractionClient:
         """.strip()
 
         try:
-            response = await self.client.chat(
-                model=self.settings.ollama_model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "Classify explicit candidate criteria into the "
-                            "requested JSON fields without omissions."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    },
-                ],
-                format=CategorizedRequirements.model_json_schema(),
-                options=self._generation_options(),
-                think=False,
-                stream=False,
-                keep_alive="10m",
+            raw_content = await self.provider.generate(
+                system_prompt=(
+                    "Classify explicit candidate criteria into "
+                    "the requested JSON fields without omissions."
+                ),
+                user_prompt=prompt,
+                schema=CategorizedRequirements.model_json_schema(),
             )
-        except ResponseError as exc:
-            raise LlmJobExtractionError(
-                f"Ollama returned an error: {exc.error}"
-            ) from exc
-        except httpx.TimeoutException as exc:
-            raise LlmJobExtractionError(
-                "Ollama did not finish requirements extraction before the timeout."
-            ) from exc
-        except httpx.ConnectError as exc:
-            raise LlmJobExtractionError(
-                "JobMatch could not connect to the Ollama server."
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise LlmJobExtractionError(
-                f"Ollama request failed: {type(exc).__name__}."
-            ) from exc
-        except ConnectionError as exc:
-            raise LlmJobExtractionError(
-                "JobMatch could not connect to the Ollama server."
-            ) from exc
-
-        raw_content = response.message.content
-
-        if not raw_content or not raw_content.strip():
-            raise LlmJobExtractionError("Ollama returned empty job requirements.")
+        except LLMProviderError as exc:
+            raise LlmJobExtractionError(str(exc)) from exc
 
         raw_content = repair_utf8_mojibake(raw_content)
 
@@ -436,7 +355,7 @@ class OllamaJobExtractionClient:
             categorized = CategorizedRequirements.model_validate(payload)
         except (json.JSONDecodeError, ValidationError) as exc:
             raise LlmJobExtractionError(
-                "Ollama returned invalid job requirements."
+                "The inference provider returned invalid job requirements."
             ) from exc
 
         grouped: dict[str, list[str]] = {
@@ -551,7 +470,12 @@ def _build_prompt(
 
 
 @lru_cache
-def get_llm_job_extraction_client() -> OllamaJobExtractionClient:
-    """Return one reusable Ollama extraction client."""
+def get_llm_job_extraction_client() -> JobExtractionService:
+    """Return one reusable job extraction service."""
 
-    return OllamaJobExtractionClient()
+    settings = get_settings()
+
+    return JobExtractionService(
+        provider=create_llm_provider(settings),
+        settings=settings,
+    )

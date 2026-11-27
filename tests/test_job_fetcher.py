@@ -1,6 +1,5 @@
 import asyncio
 import socket
-from types import SimpleNamespace
 
 import httpx2
 import pytest
@@ -30,7 +29,7 @@ from app.services.job_sources import (
     parse_lever_url,
 )
 from app.services.llm_job_extractor import (
-    OllamaJobExtractionClient,
+    JobExtractionService,
 )
 from app.services.url_security import (
     UnsafeUrlError,
@@ -580,31 +579,25 @@ def test_generic_content_rejects_short_page() -> None:
         )
 
 
-def test_ollama_job_extraction_client() -> None:
-    class FakeOllamaClient:
+def test_job_extraction_service() -> None:
+    class FakeProvider:
         def __init__(self) -> None:
-            self.received_model: str | None = None
-            self.received_messages: list[dict] | None = None
-            self.received_format: dict | None = None
+            self.received_system_prompt: str | None = None
+            self.received_user_prompt: str | None = None
+            self.received_schema: dict | None = None
 
-        async def chat(
+        async def generate(
             self,
             *,
-            model,
-            messages,
-            format,
-            options,
-            think,
-            stream,
-            keep_alive,
+            system_prompt,
+            user_prompt,
+            schema,
         ):
-            self.received_model = model
-            self.received_messages = messages
-            self.received_format = format
+            self.received_system_prompt = system_prompt
+            self.received_user_prompt = user_prompt
+            self.received_schema = schema
 
-            return SimpleNamespace(
-                message=SimpleNamespace(
-                    content="""
+            return """
                     {
                     "title": "Junior Data Engineer",
                     "company": "Example Company",
@@ -637,11 +630,9 @@ def test_ollama_job_extraction_client() -> None:
                         }
                     }
                     """
-                )
-            )
 
     async def run_test():
-        fake_client = FakeOllamaClient()
+        fake_provider = FakeProvider()
 
         settings = Settings(
             ollama_host="http://localhost:11434",
@@ -649,9 +640,9 @@ def test_ollama_job_extraction_client() -> None:
             ollama_timeout_seconds=10,
         )
 
-        extraction_client = OllamaJobExtractionClient(
+        extraction_client = JobExtractionService(
             settings=settings,
-            client=fake_client,
+            provider=fake_provider,
         )
 
         content = GenericJobContent(
@@ -669,9 +660,9 @@ def test_ollama_job_extraction_client() -> None:
 
         job = await extraction_client.extract_job(content)
 
-        return job, fake_client
+        return job, fake_provider
 
-    job, fake_client = asyncio.run(run_test())
+    job, fake_provider = asyncio.run(run_test())
 
     assert job.title == "Junior Data Engineer"
     assert job.company == "Example Company"
@@ -694,10 +685,9 @@ def test_ollama_job_extraction_client() -> None:
         "https://company.example.com/careers/junior-data-engineer"
     )
 
-    assert fake_client.received_model == "test-model"
-    assert fake_client.received_messages is not None
-    assert fake_client.received_format is not None
-    properties = fake_client.received_format["properties"]
+    assert fake_provider.received_user_prompt is not None
+    assert fake_provider.received_schema is not None
+    properties = fake_provider.received_schema["properties"]
     assert "application_url" not in properties
     assert "date_posted" not in properties
     assert "valid_through" not in properties

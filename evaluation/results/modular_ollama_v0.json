@@ -1,0 +1,60 @@
+{
+  "architecture": "modular_inference",
+  "provider": "ollama",
+  "model": "qwen3:4b-instruct-2507-q4_K_M",
+  "model_id": "0edcdef34593",
+  "evaluation_date": "2026-11-27",
+  "hardware": {
+    "gpu": "NVIDIA GeForce RTX 5060",
+    "vram_gb": 8
+  },
+  "runtime": {
+    "runner": "llamacpp",
+    "model_storage_gb": 2.5,
+    "loaded_size_gb": 3.8,
+    "reported_gpu_offload_percent": 100
+  },
+  "configuration": {
+    "temperature": 0.0,
+    "num_ctx": 8192,
+    "num_predict": 2048,
+    "max_input_characters": 8000,
+    "timeout_seconds": 300
+  },
+  "dataset_size": 6,
+  "matching_method": "normalized_exact_match",
+  "successful_extractions": 6,
+  "failed_extractions": 0,
+  "success_rate": 1.0,
+  "exact_match_rate": 0.0,
+  "global_metrics": {
+    "true_positives": 19,
+    "false_positives": 14,
+    "false_negatives": 9,
+    "precision": 0.5758,
+    "recall": 0.6786,
+    "f1": 0.6230
+  },
+  "category_f1": {
+    "required_skills": 0.8148,
+    "preferred_skills": 1.0,
+    "qualifications": 0.0,
+    "soft_skills": 0.3333,
+    "languages": 0.5
+  },
+  "latency_seconds": {
+    "initially_unloaded_run": {
+      "first_request": 16.95,
+      "mean": 4.17,
+      "samples": [16.95, 1.21, 2.13, 1.53, 1.71, 1.48]
+    },
+    "warm_run": {
+      "first_request": 1.91,
+      "mean": 1.54,
+      "samples": [1.91, 1.08, 1.98, 1.39, 1.56, 1.31]
+    }
+  },
+  "identical_predictions_across_runs": true,
+  "automated_tests_passed": 81,
+  "notes": "Initial modular architecture verification. Both runs produced identical predictions. Results are based on six development samples and do not establish comparative inference performance."
+}

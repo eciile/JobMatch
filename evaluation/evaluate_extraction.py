@@ -9,10 +9,11 @@ from statistics import mean
 from time import perf_counter
 
 from app.config import get_settings
+from app.inference.factory import create_llm_provider
 from app.schemas import JobRequirements
 from app.services.llm_job_extractor import (
+    JobExtractionService,
     LlmJobExtractionError,
-    OllamaJobExtractionClient,
 )
 
 DATASET_PATH = Path(__file__).resolve().parent / "datasets" / "job_requirements.jsonl"
@@ -119,8 +120,10 @@ def load_dataset() -> list[dict]:
 
 async def main() -> None:
     settings = get_settings()
-    client = OllamaJobExtractionClient(settings=settings)
-
+    client = JobExtractionService(
+        provider=create_llm_provider(settings),
+        settings=settings,
+    )
     dataset = load_dataset()
 
     global_metrics = Metrics()
@@ -135,6 +138,7 @@ async def main() -> None:
     successful_latencies: list[float] = []
 
     print("=== JOBMATCH EXTRACTION EVALUATION ===")
+    print("Provider:", settings.llm_provider)
     print("Model:", settings.ollama_model)
     print("Host:", settings.ollama_host)
     print("Dataset size:", len(dataset))
